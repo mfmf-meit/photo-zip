@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>写真ZIPメーカー</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Maru+Gothic:wght@700&display=swap">
 <style>
 /* Layout: 1カラムのスマホ向け。フォルダのインデックスタブの下に写真グリッド、最下部に固定の移動バー。 */
@@ -33,6 +37,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   background: var(--bg); color: var(--ink);
   font-family: var(--f-body); font-size: 15px; line-height: 1.6;
@@ -142,14 +147,26 @@ button { cursor: pointer; }
 .chip i { width: 10px; height: 10px; border-radius: 50%; }
 .chip.dashed { border-style: dashed; color: var(--ink2); }
 .chip:active { background: var(--accent); color: var(--accent-ink); }
+a.btn { text-decoration: none; }
+.done { display: flex; flex-direction: column; gap: 8px; }
+.notice { background: var(--surface); border: 1.5px solid var(--danger); border-radius: 14px; padding: 12px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 8px; }
+.notice p { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .bar > div { transition: none; } }
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <header>
     <h1>写真ZIPメーカー</h1>
     <p class="lead">写真をフォルダに分けて、ひとつのZIPにまとめます。写真はこの端末の中だけで処理され、アップロードされません。</p>
   </header>
+
+  <div class="notice" id="inapp" hidden>
+    <p><strong>このままでは保存できないことがあります</strong></p>
+    <p id="inappmsg">LINE・Instagram などのアプリの中で開いています。メニュー（「…」や共有ボタン）から「ブラウザで開く」「Safariで開く」を選んでから使ってください。</p>
+    <a class="btn ghost small" id="openext" href="#" hidden>ブラウザで開く</a>
+  </div>
 
   <section aria-labelledby="s1">
     <h2 class="step" id="s1"><b>1</b>写真を選ぶ</h2>
@@ -183,9 +200,14 @@ button { cursor: pointer; }
         <div class="inwrap"><input id="zipname" type="text" maxlength="60" autocomplete="off"><span class="ext">.zip</span></div>
       </div>
       <div class="sum" id="sum"></div>
-      <button class="btn block" id="make" type="button">ZIPを作成して保存</button>
+      <button class="btn block" id="make" type="button">ZIPを作成</button>
       <div class="bar" id="barwrap" hidden><div id="barfill"></div></div>
       <p class="status" id="status" role="status" aria-live="polite"></p>
+      <div class="done" id="done" hidden>
+        <a class="btn block" id="dlink" href="#" download="photos.zip">ZIPを保存</a>
+        <button class="btn ghost block" id="sharebtn" type="button" hidden>共有・ファイルに保存</button>
+        <p class="hint" id="donehint"></p>
+      </div>
       <p class="hint">写真は圧縮せず元の画質のまま入ります。空のフォルダはZIPに含まれません。</p>
     </div>
   </section>
@@ -453,7 +475,7 @@ function renderBody() {
   var v = viewPhotos();
   var h;
   if (!photos.length) {
-    h = '<div class="empty"><ol><li><b>1</b>「写真を追加」で写真を選ぶ</li><li><b>2</b>写真をタップして選び、移動先のフォルダを選ぶ</li><li><b>3</b>「ZIPを作成して保存」を押す</li></ol><div><button class="btn ghost small" data-act="sample">サンプル写真で試す</button></div></div>';
+    h = '<div class="empty"><ol><li><b>1</b>「写真を追加」で写真を選ぶ</li><li><b>2</b>写真をタップして選び、移動先のフォルダを選ぶ</li><li><b>3</b>「ZIPを作成」→「ZIPを保存」を押す</li></ol><div><button class="btn ghost small" data-act="sample">サンプル写真で試す</button></div></div>';
   } else if (!v.length) {
     h = '<div class="empty">ここには写真がありません。「すべて」から写真を選んで、このフォルダへ移動してください。</div>';
   } else {
@@ -504,6 +526,7 @@ function renderSummary() {
 }
 function render() {
   renderTabs(); renderHead(); renderBody(); renderForm(); renderBar(); renderSummary();
+  if (ready && ready.sig !== contentSig()) clearReady();
 }
 
 /* ---------- events ---------- */
@@ -584,6 +607,64 @@ function uniquePath(folderName, name, used) {
   used.add(path.toLowerCase());
   return path;
 }
+/* 保存は「ZIPを作成」とは別のタップで行う。iOS Safari は作成に時間がかかると
+   タップ由来の操作とみなさず、ダウンロードや共有を拒否するため。 */
+var ready = null;
+function contentSig() {
+  return photos.map(function (p) { var f = p.folder ? folderById(p.folder) : null; return p.id + ':' + (f ? f.name : ''); }).join('|');
+}
+function clearReady() {
+  if (ready) { var u = ready.url; setTimeout(function () { URL.revokeObjectURL(u); }, 60000); }
+  ready = null;
+  $('#done').hidden = true;
+}
+function canShareFile(file) {
+  try { return !!(navigator.canShare && navigator.share && navigator.canShare({ files: [file] })); } catch (e) { return false; }
+}
+function showReady(blob, zipName, sig) {
+  var name = zipName + '.zip';
+  var file = new File([blob], name, { type: 'application/zip' });
+  ready = { blob: blob, file: file, name: name, url: URL.createObjectURL(blob), sig: sig };
+  var a = $('#dlink');
+  a.href = ready.url; a.setAttribute('download', name);
+  var share = canShareFile(file);
+  $('#sharebtn').hidden = !share;
+  $('#donehint').textContent = IS_IOS
+    ? '「ダウンロード」の確認が出たら許可してください。保存先は「ファイル」アプリの「ダウンロード」フォルダです。' + (share ? 'うまくいかないときは「共有・ファイルに保存」を使ってください。' : '')
+    : IS_ANDROID
+      ? '保存先は「Files」アプリなどの「ダウンロード（Download）」フォルダです。'
+      : 'ブラウザのダウンロード先に保存されます。';
+  $('#done').hidden = false;
+  setStatus('ZIPができました（' + fmtSize(blob.size) + '）。下のボタンで保存してください。');
+}
+$('#dlink').addEventListener('click', async function (e) {
+  if (!ready) { e.preventDefault(); return; }
+  if (!dl) return; // 普通のブラウザではリンクのダウンロードに任せる
+  e.preventDefault(); // Claude の画面内ではダウンロード機能を使う
+  try {
+    await dl.save({ filename: ready.name, data: ready.blob });
+    setStatus('保存しました（' + fmtSize(ready.blob.size) + '）。');
+  } catch (err) {
+    setStatus(err && err.code === 'declined' ? '保存をキャンセルしました。もう一度押すとやり直せます。' : '保存できませんでした。もう一度お試しください。', true);
+  }
+});
+$('#sharebtn').addEventListener('click', async function () {
+  if (!ready) return;
+  try {
+    await navigator.share({ files: [ready.file] });
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    setStatus('共有できませんでした。「ZIPを保存」をお試しください。', true);
+  }
+});
+$('#zipname').addEventListener('input', function () {
+  if (!ready) return;
+  var name = (cleanName(this.value, 60) || ('写真_' + today())) + '.zip';
+  ready.name = name;
+  ready.file = new File([ready.blob], name, { type: 'application/zip' });
+  $('#dlink').setAttribute('download', name);
+});
+
 $('#make').addEventListener('click', async function () {
   if (busy || !photos.length) return;
   var total = photos.reduce(function (s, p) { return s + p.file.size; }, 0);
@@ -599,6 +680,8 @@ $('#make').addEventListener('click', async function () {
     var f = p.folder ? folderById(p.folder) : null;
     entries.push({ path: uniquePath(f ? f.name : '', p.name, used), file: p.file });
   });
+  var sig = contentSig();
+  clearReady();
   busy = true; renderSummary();
   $('#barwrap').hidden = false; $('#barfill').style.width = '0%';
   setStatus('ZIPを作成中… 0 / ' + entries.length);
@@ -608,21 +691,11 @@ $('#make').addEventListener('click', async function () {
       setStatus('ZIPを作成中… ' + i + ' / ' + n);
       await new Promise(function (r) { setTimeout(r, 0); });
     });
-    if (!dl) { try { dl = await (window.claude && window.claude.use ? window.claude.use('downloads') : null); } catch (e) { dl = null; } }
-    if (!dl) {
-      setStatus('この画面では保存を開始できません。ClaudeのアプリかWebブラウザでこのページを開き直してください。', true);
-    } else {
-      setStatus('保存の確認が表示されます。許可してください。');
-      await dl.save({ filename: zipName + '.zip', data: blob });
-      setStatus('保存しました（' + fmtSize(blob.size) + '）。ダウンロード先のファイルアプリで確認できます。');
-    }
+    showReady(blob, zipName, sig);
   } catch (err) {
-    var code = err && err.code;
-    var msg = code === 'declined' ? '保存をキャンセルしました。もう一度押すとやり直せます。'
-      : code === 'too_large' ? 'ファイルが大きすぎて保存できません。写真を減らして分けてください。'
-      : code === 'rate_limited' ? '少し待ってからもう一度押してください。'
-      : 'ZIPを保存できませんでした。もう一度お試しください。';
-    setStatus(msg, true);
+    setStatus(IS_MOBILE && total > 1e9
+      ? 'ZIPを作成できませんでした。スマホでは合計1GBを超えると失敗しやすいので、写真を減らして分けてください。'
+      : 'ZIPを作成できませんでした。写真を選び直してもう一度お試しください。', true);
   } finally {
     busy = false; renderSummary();
     setTimeout(function () { $('#barwrap').hidden = true; }, 600);
@@ -630,8 +703,47 @@ $('#make').addEventListener('click', async function () {
 });
 
 /* ---------- init ---------- */
+var UA = navigator.userAgent;
+var IS_IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+var IS_ANDROID = /Android/.test(UA);
+var IS_MOBILE = IS_IOS || IS_ANDROID;
+/* アプリ内ブラウザで開かれたら、外部のブラウザへ自動で切り替える。
+   Claude の画面内（window.claude あり）では切り替えない。 */
+var IS_LINE = /\bLine\//.test(UA);
+var IN_APP = !window.claude && (IS_LINE || /FBAN|FBAV|Instagram|MicroMessenger|Twitter|; wv\)/.test(UA));
+function externalUrl() {
+  if (!/^https?:$/.test(location.protocol)) return null;
+  if (IS_LINE) {
+    // LINE は openExternalBrowser=1 を付けると既定のブラウザで開く
+    var u = new URL(location.href);
+    if (u.searchParams.get('openExternalBrowser') === '1') return null; // 付けても開けなかった
+    u.searchParams.set('openExternalBrowser', '1');
+    return u.toString();
+  }
+  if (IS_ANDROID) {
+    // package を指定しない intent は既定のブラウザ（または選択画面）で開く
+    return 'intent://' + location.host + location.pathname + location.search +
+      '#Intent;scheme=' + location.protocol.slice(0, -1) + ';end';
+  }
+  if (IS_IOS) return 'x-safari-' + location.href; // iOS 17 以降は Safari で開く
+  return null;
+}
+if (IN_APP) {
+  $('#inapp').hidden = false;
+  var ext = externalUrl();
+  if (ext) {
+    $('#openext').href = ext;
+    $('#openext').hidden = false;
+    $('#inappmsg').textContent = 'LINE・Instagram などのアプリの中で開いています。ブラウザに切り替えています… 切り替わらないときは下のボタンを押すか、メニュー（「…」や共有ボタン）から「ブラウザで開く」「Safariで開く」を選んでください。';
+    var tried = false;
+    try { tried = sessionStorage.getItem('pz-ext-tried') === '1'; sessionStorage.setItem('pz-ext-tried', '1'); } catch (e) { /* 自動切替は一度だけ */ }
+    if (!tried) location.href = ext;
+  }
+}
 $('#zipname').value = '写真_' + today();
 render();
 try { Promise.resolve(window.claude && window.claude.use ? window.claude.use('downloads') : null).then(function (d) { dl = d || null; }, function () { dl = null; }); } catch (e) { dl = null; }
 })();
 </script>
+</body>
+</html>
