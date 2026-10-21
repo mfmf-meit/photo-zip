@@ -1,0 +1,637 @@
+<title>写真ZIPメーカー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Maru+Gothic:wght@700&display=swap">
+<style>
+/* Layout: 1カラムのスマホ向け。フォルダのインデックスタブの下に写真グリッド、最下部に固定の移動バー。 */
+:root {
+  --bg: #EEF1F2;
+  --surface: #FFFFFF;
+  --surface2: #E6EAEC;
+  --line: #D2D9DC;
+  --ink: #172023;
+  --ink2: #566970;
+  --accent: #E0A030;
+  --accent-ink: #231A05;
+  --danger: #B3362F;
+  --shadow: 0 -8px 28px rgba(23, 32, 35, .16);
+  --f-display: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --f-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F1416; --surface: #171E21; --surface2: #212A2E; --line: #2E3A3F;
+    --ink: #E8EEF0; --ink2: #93A4AB; --accent: #E7B04A; --accent-ink: #231A05;
+    --danger: #F0827A; --shadow: 0 -8px 28px rgba(0, 0, 0, .5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F1416; --surface: #171E21; --surface2: #212A2E; --line: #2E3A3F;
+  --ink: #E8EEF0; --ink2: #93A4AB; --accent: #E7B04A; --accent-ink: #231A05;
+  --danger: #F0827A; --shadow: 0 -8px 28px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--f-body); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 140px;
+}
+.wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1 { font-family: var(--f-display); font-size: 26px; line-height: 1.25; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+.lead { margin: 6px 0 0; color: var(--ink2); font-size: 14px; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.step { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; font-family: var(--f-display); font-size: 17px; }
+.step b { font-family: var(--f-mono); font-weight: 500; font-size: 13px; color: var(--ink2); border: 1px solid var(--line); border-radius: 6px; padding: 0 7px; }
+
+.addbtn {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  background: var(--surface); border: 1.5px dashed var(--ink2); border-radius: 14px;
+  padding: 16px; cursor: pointer;
+}
+.addbtn:hover { border-color: var(--accent); }
+.addbtn .ico { flex: none; width: 44px; height: 44px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; }
+.addbtn strong { display: block; font-size: 16px; }
+.addbtn span.sub { color: var(--ink2); font-size: 13px; }
+#picker { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+#picker:focus-visible + .addbtn { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.tabs { display: flex; gap: 4px; overflow-x: auto; padding-top: 2px; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; position: relative; display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 14px 9px; min-height: 44px; white-space: nowrap;
+  background: var(--surface2); border: 1px solid var(--line); border-bottom: none;
+  border-radius: 10px 10px 0 0; color: var(--ink2);
+}
+.tab::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 4px; border-radius: 10px 10px 0 0; background: var(--tc, var(--line)); }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 700; z-index: 1; margin-bottom: -1px; padding-bottom: 10px; }
+.tab .n { font-family: var(--f-mono); font-size: 12px; font-variant-numeric: tabular-nums; opacity: .8; }
+.tab.plus { background: transparent; border-style: dashed; color: var(--ink2); }
+.tab.plus::before { display: none; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 0 14px 14px 14px; padding: 12px; position: relative; }
+.phead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 10px; min-height: 34px; }
+.phead .title { font-weight: 700; }
+.sp { flex: 1; }
+.lnk { background: none; border: none; padding: 8px 4px; min-height: 36px; color: var(--ink2); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; }
+.lnk.danger { color: var(--danger); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.tile { position: relative; aspect-ratio: 1; max-width: 100%; padding: 0; border: none; border-radius: 8px; overflow: hidden; background: var(--surface2); display: block; }
+.tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile img.off { display: none; }
+.tile .ph { position: absolute; inset: 0; display: grid; place-items: center; padding: 6px; font-size: 11px; line-height: 1.3; color: var(--ink2); word-break: break-all; text-align: center; }
+.tile .chk { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0, 0, 0, .28); display: grid; place-items: center; color: transparent; }
+.tile[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: -3px; }
+.tile[aria-pressed="true"] .chk { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tile[aria-pressed="true"] img { opacity: .82; }
+.tile .tag { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 5px; border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 11px; line-height: 1.6; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tile .tag i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+
+.empty { padding: 22px 8px 10px; text-align: center; color: var(--ink2); }
+.empty ol { list-style: none; padding: 0; margin: 0 auto 16px; display: inline-flex; flex-direction: column; gap: 6px; text-align: left; color: var(--ink); }
+.empty li { display: flex; gap: 10px; align-items: baseline; }
+.empty li b { font-family: var(--f-mono); font-weight: 500; font-size: 12px; color: var(--ink2); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 20px; border: none; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 16px; }
+.btn.ghost { background: var(--surface2); color: var(--ink); font-weight: 500; }
+.btn.small { min-height: 44px; padding: 0 14px; font-size: 15px; }
+.btn.block { width: 100%; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.field label { display: block; font-size: 13px; color: var(--ink2); margin-bottom: 4px; }
+.inwrap { display: flex; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding-right: 12px; }
+.inwrap input { flex: 1; min-width: 0; background: transparent; border: none; padding: 12px; font-size: 16px; }
+.inwrap input:focus-visible { outline: none; }
+.inwrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.inwrap .ext { font-family: var(--f-mono); color: var(--ink2); }
+.sum { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink2); font-size: 14px; }
+.sum b { color: var(--ink); font-family: var(--f-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+.bar { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
+.bar > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.status { margin: 0; font-size: 14px; min-height: 1.6em; }
+.status.err { color: var(--danger); }
+.hint { margin: 0; font-size: 13px; color: var(--ink2); }
+
+.nf { display: flex; gap: 8px; margin: 0 0 4px; }
+.nf input { flex: 1; min-width: 0; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; }
+.nf input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.err { margin: 2px 0 8px; font-size: 13px; color: var(--danger); min-height: 0; }
+.err:empty { display: none; }
+
+#selbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  background: var(--surface); border-top: 1px solid var(--line); box-shadow: var(--shadow);
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+#selbar .in { max-width: 640px; margin: 0 auto; }
+.selrow { display: flex; align-items: center; gap: 6px; }
+.movelabel { font-size: 12px; color: var(--ink2); margin: 2px 0 6px; letter-spacing: .08em; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); }
+.chip i { width: 10px; height: 10px; border-radius: 50%; }
+.chip.dashed { border-style: dashed; color: var(--ink2); }
+.chip:active { background: var(--accent); color: var(--accent-ink); }
+@media (prefers-reduced-motion: reduce) { .bar > div { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>写真ZIPメーカー</h1>
+    <p class="lead">写真をフォルダに分けて、ひとつのZIPにまとめます。写真はこの端末の中だけで処理され、アップロードされません。</p>
+  </header>
+
+  <section aria-labelledby="s1">
+    <h2 class="step" id="s1"><b>1</b>写真を選ぶ</h2>
+    <input id="picker" type="file" accept="image/*" multiple>
+    <label class="addbtn" for="picker">
+      <span class="ico" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </span>
+      <span>
+        <strong>写真を追加</strong>
+        <span class="sub" id="addsub">フォトライブラリから複数まとめて選べます</span>
+      </span>
+    </label>
+  </section>
+
+  <section aria-labelledby="s2">
+    <h2 class="step" id="s2"><b>2</b>フォルダに分ける</h2>
+    <div class="tabs" id="tabs" role="tablist" aria-label="フォルダ"></div>
+    <div class="panel">
+      <div class="phead" id="phead"></div>
+      <div id="formslot"></div>
+      <div id="body"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s3">
+    <h2 class="step" id="s3"><b>3</b>ZIPで保存</h2>
+    <div class="card">
+      <div class="field">
+        <label for="zipname">ZIPのファイル名</label>
+        <div class="inwrap"><input id="zipname" type="text" maxlength="60" autocomplete="off"><span class="ext">.zip</span></div>
+      </div>
+      <div class="sum" id="sum"></div>
+      <button class="btn block" id="make" type="button">ZIPを作成して保存</button>
+      <div class="bar" id="barwrap" hidden><div id="barfill"></div></div>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="hint">写真は圧縮せず元の画質のまま入ります。空のフォルダはZIPに含まれません。</p>
+    </div>
+  </section>
+</div>
+
+<div id="selbar" hidden></div>
+
+<script>
+(function () {
+'use strict';
+
+/* ---------- ZIP writer (store only, UTF-8 names) ---------- */
+//<zip>
+var CRC_TABLE = (function () {
+  var t = new Uint32Array(256);
+  for (var n = 0; n < 256; n++) {
+    var c = n;
+    for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function dosDateTime(ms) {
+  var d = new Date(ms);
+  var y = d.getFullYear();
+  if (y < 1980) return [0, (1 << 5) | 1];
+  var time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  var date = ((y - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  return [time, date];
+}
+async function buildZip(entries, onProgress) {
+  var enc = new TextEncoder();
+  var parts = [], central = [], offset = 0;
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    var nameBytes = enc.encode(e.path);
+    var data = new Uint8Array(await e.file.arrayBuffer());
+    var crc = crc32(data), size = data.length;
+    data = null;
+    var dt = dosDateTime(e.file.lastModified || Date.now());
+
+    var lh = new DataView(new ArrayBuffer(30 + nameBytes.length));
+    lh.setUint32(0, 0x04034b50, true);
+    lh.setUint16(4, 20, true);
+    lh.setUint16(6, 0x0800, true);
+    lh.setUint16(8, 0, true);
+    lh.setUint16(10, dt[0], true);
+    lh.setUint16(12, dt[1], true);
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, size, true);
+    lh.setUint32(22, size, true);
+    lh.setUint16(26, nameBytes.length, true);
+    lh.setUint16(28, 0, true);
+    new Uint8Array(lh.buffer).set(nameBytes, 30);
+    parts.push(lh.buffer, e.file);
+
+    var ch = new DataView(new ArrayBuffer(46 + nameBytes.length));
+    ch.setUint32(0, 0x02014b50, true);
+    ch.setUint16(4, 20, true);
+    ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0x0800, true);
+    ch.setUint16(10, 0, true);
+    ch.setUint16(12, dt[0], true);
+    ch.setUint16(14, dt[1], true);
+    ch.setUint32(16, crc, true);
+    ch.setUint32(20, size, true);
+    ch.setUint32(24, size, true);
+    ch.setUint16(28, nameBytes.length, true);
+    ch.setUint16(30, 0, true);
+    ch.setUint16(32, 0, true);
+    ch.setUint16(34, 0, true);
+    ch.setUint16(36, 0, true);
+    ch.setUint32(38, 0, true);
+    ch.setUint32(42, offset, true);
+    new Uint8Array(ch.buffer).set(nameBytes, 46);
+    central.push(ch.buffer);
+
+    offset += 30 + nameBytes.length + size;
+    if (onProgress) await onProgress(i + 1, entries.length);
+  }
+  var cdSize = 0;
+  for (var j = 0; j < central.length; j++) cdSize += central[j].byteLength;
+  var eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(8, entries.length, true);
+  eocd.setUint16(10, entries.length, true);
+  eocd.setUint32(12, cdSize, true);
+  eocd.setUint32(16, offset, true);
+  return new Blob(parts.concat(central, [eocd.buffer]), { type: 'application/zip' });
+}
+//</zip>
+
+/* ---------- state ---------- */
+var COLORS = ['#E0A030', '#2A9D8F', '#D9576B', '#4A7FD0', '#8C6BC8', '#6BA24A'];
+var photos = [], folders = [];
+var filter = 'all', selected = new Set(), formMode = null, renamingId = null;
+var nextId = 1, busy = false, folderCount = 0;
+var dl = null;
+
+function $(s) { return document.querySelector(s); }
+function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+function fmtSize(b) {
+  if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
+  if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+  return Math.max(1, Math.round(b / 1e3)) + ' KB';
+}
+function folderById(id) { for (var i = 0; i < folders.length; i++) if (folders[i].id === id) return folders[i]; return null; }
+function countIn(id) { return photos.filter(function (p) { return p.folder === id; }).length; }
+function cleanName(s, max) {
+  s = String(s).replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
+  return s.slice(0, max || 40);
+}
+function viewPhotos() {
+  return photos.filter(function (p) {
+    return filter === 'all' ? true : filter === 'none' ? p.folder == null : p.folder === filter;
+  });
+}
+function today() {
+  var d = new Date();
+  function z(n) { return (n < 10 ? '0' : '') + n; }
+  return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate());
+}
+
+/* ---------- thumbnails ---------- */
+var thumbBusy = false;
+async function makeThumb(file) {
+  try {
+    var bmp = await createImageBitmap(file, { resizeWidth: 360, resizeQuality: 'medium' });
+    var c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    c.getContext('2d').drawImage(bmp, 0, 0);
+    if (bmp.close) bmp.close();
+    var blob = await new Promise(function (r) { c.toBlob(r, 'image/jpeg', 0.72); });
+    if (blob) return URL.createObjectURL(blob);
+  } catch (e) { /* fall through */ }
+  return URL.createObjectURL(file);
+}
+async function runThumbs() {
+  if (thumbBusy) return;
+  thumbBusy = true;
+  for (;;) {
+    var p = photos.find(function (x) { return !x.thumbTried; });
+    if (!p) break;
+    p.thumbTried = true;
+    p.thumb = await makeThumb(p.file);
+    var img = document.querySelector('.tile[data-id="' + p.id + '"] img');
+    if (img) { img.classList.remove('off'); img.src = p.thumb; }
+    await new Promise(function (r) { setTimeout(r, 0); });
+  }
+  thumbBusy = false;
+}
+
+/* ---------- actions ---------- */
+function addFiles(list) {
+  var added = 0;
+  Array.prototype.forEach.call(list, function (f) {
+    var ok = (f.type && f.type.indexOf('image/') === 0) || /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(f.name);
+    if (!ok) return;
+    photos.push({ id: nextId++, file: f, name: cleanName(f.name, 120) || 'photo', folder: folderById(filter) ? filter : null, thumb: '', thumbTried: false });
+    added++;
+  });
+  if (added) { setStatus(''); render(); runThumbs(); }
+}
+function addFolder(name) {
+  var f = { id: 'f' + (++folderCount), name: name, color: COLORS[(folderCount - 1) % COLORS.length] };
+  folders.push(f);
+  return f;
+}
+function validateFolderName(raw, exceptId) {
+  var name = cleanName(raw, 40);
+  if (!name) return { err: 'フォルダ名を入力してください' };
+  var dup = folders.some(function (f) { return f.id !== exceptId && f.name.toLowerCase() === name.toLowerCase(); });
+  if (dup) return { err: '同じ名前のフォルダがあります' };
+  return { name: name };
+}
+function moveSelected(to) {
+  photos.forEach(function (p) { if (selected.has(p.id)) p.folder = to; });
+  selected.clear();
+  formMode = null;
+  render();
+}
+function setFilter(f) {
+  filter = f; selected.clear(); formMode = null; renamingId = null; render();
+}
+function setStatus(msg, isErr) {
+  var s = $('#status');
+  s.textContent = msg;
+  s.className = 'status' + (isErr ? ' err' : '');
+}
+
+/* ---------- sample photos ---------- */
+function makeSample(i) {
+  var pal = [
+    ['#f6c177', '#eb6f92', '#31748f'], ['#9ccfd8', '#c4a7e7', '#26233a'], ['#f2e9de', '#d7827e', '#56949f'],
+    ['#8fb8de', '#f4ede8', '#4c6b57'], ['#ffb86b', '#d65d5d', '#3d405b'], ['#b7e4c7', '#74c69d', '#1b4332']
+  ][i % 6];
+  var c = document.createElement('canvas');
+  c.width = 640; c.height = 480;
+  var g = c.getContext('2d');
+  var sky = g.createLinearGradient(0, 0, 0, 480);
+  sky.addColorStop(0, pal[0]); sky.addColorStop(1, pal[1]);
+  g.fillStyle = sky; g.fillRect(0, 0, 640, 480);
+  g.fillStyle = 'rgba(255,255,255,.85)';
+  g.beginPath(); g.arc(120 + i * 70, 120 + (i % 3) * 20, 46, 0, 7); g.fill();
+  g.fillStyle = pal[2];
+  g.beginPath(); g.moveTo(0, 480); g.lineTo(0, 330); g.quadraticCurveTo(180, 220 - i * 6, 340, 340); g.quadraticCurveTo(480, 260, 640, 350); g.lineTo(640, 480); g.fill();
+  g.fillStyle = 'rgba(0,0,0,.22)';
+  g.beginPath(); g.moveTo(0, 480); g.lineTo(0, 410); g.quadraticCurveTo(260, 340, 640, 430); g.lineTo(640, 480); g.fill();
+  return new Promise(function (r) {
+    c.toBlob(function (b) {
+      r(new File([b], 'sample-' + (i + 1) + '.jpg', { type: 'image/jpeg', lastModified: Date.now() - i * 86400000 }));
+    }, 'image/jpeg', 0.85);
+  });
+}
+async function addSamples() {
+  var a = folders.find(function (f) { return f.name === '旅行'; }) || addFolder('旅行');
+  var b = folders.find(function (f) { return f.name === '家族'; }) || addFolder('家族');
+  for (var i = 0; i < 6; i++) {
+    var f = await makeSample(i);
+    photos.push({ id: nextId++, file: f, name: f.name, folder: i < 3 ? a.id : b.id, thumb: '', thumbTried: false });
+  }
+  filter = 'all';
+  render(); runThumbs();
+}
+
+/* ---------- render ---------- */
+function formHtml(mode) {
+  var val = '', label = '作成';
+  if (mode === 'rename') { var f = folderById(filter); val = f ? f.name : ''; label = '変更'; }
+  if (mode === 'newmove') label = '作成して移動';
+  return '<form class="nf" data-mode="' + mode + '"><input id="nfname" type="text" maxlength="40" autocomplete="off" enterkeyhint="done" placeholder="フォルダ名（例：旅行）" value="' + esc(val) + '" aria-label="フォルダ名">' +
+    '<button class="btn small" type="submit">' + label + '</button>' +
+    '<button class="btn ghost small" type="button" data-act="cancelform">やめる</button></form><p class="err" id="nferr"></p>';
+}
+function renderTabs() {
+  var h = '';
+  function tab(key, label, n, color) {
+    h += '<button class="tab" role="tab" aria-selected="' + (filter === key) + '" data-f="' + key + '" style="--tc:' + color + '">' + esc(label) + '<span class="n">' + n + '</span></button>';
+  }
+  tab('all', 'すべて', photos.length, 'var(--ink2)');
+  tab('none', '未分類', countIn(null), 'var(--line)');
+  folders.forEach(function (f) { tab(f.id, f.name, countIn(f.id), f.color); });
+  h += '<button class="tab plus" data-act="newfolder">＋ フォルダ</button>';
+  $('#tabs').innerHTML = h;
+}
+function renderHead() {
+  var v = viewPhotos();
+  var title = filter === 'all' ? 'すべての写真' : filter === 'none' ? '未分類の写真' : (folderById(filter) || {}).name;
+  var h = '<span class="title">' + esc(title) + '</span><span class="mono" style="color:var(--ink2)">' + v.length + '枚</span><span class="sp"></span>';
+  if (v.length) {
+    var allSel = v.every(function (p) { return selected.has(p.id); });
+    h += '<button class="lnk" data-act="selall">' + (allSel ? '選択を解除' : '全て選択') + '</button>';
+  }
+  if (folderById(filter)) {
+    h += '<button class="lnk" data-act="rename">名前を変更</button><button class="lnk danger" data-act="delfolder">フォルダを削除</button>';
+  }
+  $('#phead').innerHTML = h;
+}
+function renderBody() {
+  var v = viewPhotos();
+  var h;
+  if (!photos.length) {
+    h = '<div class="empty"><ol><li><b>1</b>「写真を追加」で写真を選ぶ</li><li><b>2</b>写真をタップして選び、移動先のフォルダを選ぶ</li><li><b>3</b>「ZIPを作成して保存」を押す</li></ol><div><button class="btn ghost small" data-act="sample">サンプル写真で試す</button></div></div>';
+  } else if (!v.length) {
+    h = '<div class="empty">ここには写真がありません。「すべて」から写真を選んで、このフォルダへ移動してください。</div>';
+  } else {
+    h = '<div class="grid" id="grid">';
+    v.forEach(function (p) {
+      var f = filter === 'all' && p.folder ? folderById(p.folder) : null;
+      h += '<button class="tile" data-id="' + p.id + '" aria-pressed="' + selected.has(p.id) + '" aria-label="' + esc(p.name) + '">' +
+        '<span class="ph">' + esc(p.name) + '</span>' +
+        (p.thumb ? '<img alt="" src="' + p.thumb + '">' : '<img alt="" class="off">') +
+        '<span class="chk"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>' +
+        (f ? '<span class="tag"><i style="background:' + f.color + '"></i>' + esc(f.name) + '</span>' : '') + '</button>';
+    });
+    h += '</div>';
+  }
+  $('#body').innerHTML = h;
+}
+function renderForm() {
+  var slot = $('#formslot');
+  if (formMode === 'new' || formMode === 'rename') {
+    slot.innerHTML = formHtml(formMode);
+    var i = $('#nfname'); if (i) { i.focus(); i.select(); }
+  } else slot.innerHTML = '';
+}
+function renderBar() {
+  var bar = $('#selbar');
+  var n = selected.size;
+  if (!n) { bar.hidden = true; bar.innerHTML = ''; return; }
+  var h = '<div class="in"><div class="selrow"><strong><span class="mono">' + n + '</span>枚を選択中</strong><span class="sp"></span>' +
+    '<button class="lnk" data-act="clearsel">解除</button><button class="lnk danger" data-act="remove">一覧から外す</button></div>' +
+    '<div class="movelabel">移動先</div><div class="chips">' +
+    '<button class="chip" data-act="moveto" data-to="none"><i style="background:var(--line)"></i>未分類</button>';
+  folders.forEach(function (f) {
+    h += '<button class="chip" data-act="moveto" data-to="' + f.id + '"><i style="background:' + f.color + '"></i>' + esc(f.name) + '</button>';
+  });
+  h += '<button class="chip dashed" data-act="newmove">＋ 新しいフォルダ</button></div>';
+  if (formMode === 'newmove') h += formHtml('newmove');
+  h += '</div>';
+  bar.innerHTML = h;
+  bar.hidden = false;
+  if (formMode === 'newmove') { var i = $('#nfname'); if (i) i.focus(); }
+}
+function renderSummary() {
+  var total = photos.reduce(function (s, p) { return s + p.file.size; }, 0);
+  var used = folders.filter(function (f) { return countIn(f.id) > 0; }).length;
+  $('#sum').innerHTML = '<span>写真 <b>' + photos.length + '</b>枚</span><span>フォルダ <b>' + used + '</b>個</span><span>サイズ <b>' + fmtSize(total) + '</b></span>';
+  $('#make').disabled = busy || !photos.length;
+  $('#addsub').textContent = photos.length ? photos.length + '枚を読み込み済み。さらに追加できます' : 'フォトライブラリから複数まとめて選べます';
+}
+function render() {
+  renderTabs(); renderHead(); renderBody(); renderForm(); renderBar(); renderSummary();
+}
+
+/* ---------- events ---------- */
+$('#picker').addEventListener('change', function (e) {
+  addFiles(e.target.files);
+  e.target.value = '';
+});
+document.addEventListener('click', function (e) {
+  var tile = e.target.closest('.tile');
+  if (tile) {
+    var id = Number(tile.getAttribute('data-id'));
+    if (selected.has(id)) selected.delete(id); else selected.add(id);
+    formMode = formMode === 'newmove' ? null : formMode;
+    renderHead(); renderBar();
+    tile.setAttribute('aria-pressed', selected.has(id));
+    return;
+  }
+  var tab = e.target.closest('[data-f]');
+  if (tab) { setFilter(tab.getAttribute('data-f')); return; }
+  var b = e.target.closest('[data-act]');
+  if (!b) return;
+  var act = b.getAttribute('data-act');
+  if (act === 'sample') addSamples();
+  else if (act === 'newfolder') { formMode = formMode === 'new' ? null : 'new'; renderForm(); renderBar(); }
+  else if (act === 'rename') { formMode = 'rename'; renderForm(); renderBar(); }
+  else if (act === 'newmove') { formMode = formMode === 'newmove' ? null : 'newmove'; renderBar(); }
+  else if (act === 'cancelform') { formMode = null; renderForm(); renderBar(); }
+  else if (act === 'selall') {
+    var v = viewPhotos();
+    var allSel = v.every(function (p) { return selected.has(p.id); });
+    v.forEach(function (p) { if (allSel) selected.delete(p.id); else selected.add(p.id); });
+    renderHead(); renderBody(); renderBar();
+  }
+  else if (act === 'clearsel') { selected.clear(); formMode = null; renderHead(); renderBody(); renderBar(); renderForm(); }
+  else if (act === 'remove') {
+    photos = photos.filter(function (p) {
+      if (selected.has(p.id)) { if (p.thumb && p.thumb.indexOf('blob:') === 0) URL.revokeObjectURL(p.thumb); return false; }
+      return true;
+    });
+    selected.clear(); formMode = null; render();
+  }
+  else if (act === 'moveto') {
+    var to = b.getAttribute('data-to');
+    moveSelected(to === 'none' ? null : to);
+  }
+  else if (act === 'delfolder') {
+    photos.forEach(function (p) { if (p.folder === filter) p.folder = null; });
+    folders = folders.filter(function (f) { return f.id !== filter; });
+    filter = 'none'; selected.clear(); formMode = null; render();
+  }
+});
+document.addEventListener('submit', function (e) {
+  var form = e.target.closest('.nf');
+  if (!form) return;
+  e.preventDefault();
+  var mode = form.getAttribute('data-mode');
+  var raw = $('#nfname').value;
+  var res = validateFolderName(raw, mode === 'rename' ? filter : null);
+  if (res.err) { $('#nferr').textContent = res.err; return; }
+  if (mode === 'new') { var f = addFolder(res.name); formMode = null; filter = f.id; selected.clear(); render(); }
+  else if (mode === 'rename') { folderById(filter).name = res.name; formMode = null; render(); }
+  else if (mode === 'newmove') { var nf = addFolder(res.name); moveSelected(nf.id); }
+});
+document.addEventListener('error', function (e) {
+  var t = e.target;
+  if (t && t.tagName === 'IMG' && t.closest('.tile')) t.classList.add('off');
+}, true);
+
+/* ---------- export ---------- */
+function uniquePath(folderName, name, used) {
+  var dot = name.lastIndexOf('.');
+  var base = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : '';
+  var path = folderName ? folderName + '/' + name : name, n = 2;
+  while (used.has(path.toLowerCase())) {
+    path = (folderName ? folderName + '/' : '') + base + ' (' + n + ')' + ext;
+    n++;
+  }
+  used.add(path.toLowerCase());
+  return path;
+}
+$('#make').addEventListener('click', async function () {
+  if (busy || !photos.length) return;
+  var total = photos.reduce(function (s, p) { return s + p.file.size; }, 0);
+  if (total > 3.8e9) { setStatus('合計サイズが大きすぎます（上限は約3.8GB）。写真を減らして分けて保存してください。', true); return; }
+  if (photos.length > 60000) { setStatus('写真が多すぎます。60,000枚以下にしてください。', true); return; }
+  var zipName = cleanName($('#zipname').value, 60) || ('写真_' + today());
+  var used = new Set(), entries = [];
+  var order = photos.slice().sort(function (a, b) {
+    var fa = a.folder ? folders.indexOf(folderById(a.folder)) : -1, fb = b.folder ? folders.indexOf(folderById(b.folder)) : -1;
+    return fa - fb || a.id - b.id;
+  });
+  order.forEach(function (p) {
+    var f = p.folder ? folderById(p.folder) : null;
+    entries.push({ path: uniquePath(f ? f.name : '', p.name, used), file: p.file });
+  });
+  busy = true; renderSummary();
+  $('#barwrap').hidden = false; $('#barfill').style.width = '0%';
+  setStatus('ZIPを作成中… 0 / ' + entries.length);
+  try {
+    var blob = await buildZip(entries, async function (i, n) {
+      $('#barfill').style.width = Math.round(i / n * 100) + '%';
+      setStatus('ZIPを作成中… ' + i + ' / ' + n);
+      await new Promise(function (r) { setTimeout(r, 0); });
+    });
+    if (!dl) { try { dl = await (window.claude && window.claude.use ? window.claude.use('downloads') : null); } catch (e) { dl = null; } }
+    if (!dl) {
+      setStatus('この画面では保存を開始できません。ClaudeのアプリかWebブラウザでこのページを開き直してください。', true);
+    } else {
+      setStatus('保存の確認が表示されます。許可してください。');
+      await dl.save({ filename: zipName + '.zip', data: blob });
+      setStatus('保存しました（' + fmtSize(blob.size) + '）。ダウンロード先のファイルアプリで確認できます。');
+    }
+  } catch (err) {
+    var code = err && err.code;
+    var msg = code === 'declined' ? '保存をキャンセルしました。もう一度押すとやり直せます。'
+      : code === 'too_large' ? 'ファイルが大きすぎて保存できません。写真を減らして分けてください。'
+      : code === 'rate_limited' ? '少し待ってからもう一度押してください。'
+      : 'ZIPを保存できませんでした。もう一度お試しください。';
+    setStatus(msg, true);
+  } finally {
+    busy = false; renderSummary();
+    setTimeout(function () { $('#barwrap').hidden = true; }, 600);
+  }
+});
+
+/* ---------- init ---------- */
+$('#zipname').value = '写真_' + today();
+render();
+try { Promise.resolve(window.claude && window.claude.use ? window.claude.use('downloads') : null).then(function (d) { dl = d || null; }, function () { dl = null; }); } catch (e) { dl = null; }
+})();
+</script>
